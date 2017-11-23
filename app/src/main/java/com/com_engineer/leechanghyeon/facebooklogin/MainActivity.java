@@ -1,12 +1,11 @@
 package com.com_engineer.leechanghyeon.facebooklogin;
 
 import android.Manifest;
-import android.app.Activity;
+import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.net.Uri;
+import android.content.pm.Signature;
 import android.os.Build;
 import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
@@ -29,28 +28,40 @@ import com.facebook.GraphRequest;
 import com.facebook.GraphResponse;
 import com.facebook.Profile;
 import com.facebook.appevents.AppEventsLogger;
-import com.facebook.internal.ImageRequest;
 import com.facebook.login.LoginManager;
 import com.facebook.login.LoginResult;
-import com.facebook.login.widget.LoginButton;
-import com.kakao.SessionCallback;
+import com.kakao.auth.AuthType;
+import com.kakao.auth.ISessionCallback;
+import com.kakao.auth.Session;
+import com.kakao.network.ErrorResult;
+import com.kakao.usermgmt.UserManagement;
+import com.kakao.usermgmt.callback.MeResponseCallback;
+import com.kakao.usermgmt.response.model.UserProfile;
+import com.kakao.util.exception.KakaoException;
+import com.kakao.util.helper.log.Logger;
 
 
-import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.net.MalformedURLException;
-import java.net.URL;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 
 import static com.com_engineer.leechanghyeon.facebooklogin.R.id.main_imageview_profile;
+import static com.kakao.auth.Session.getCurrentSession;
 
 public class MainActivity extends AppCompatActivity {
+    private static final int CANCLEJOINSOCIALUSER = 54321;
+    private static final int JOINSOCIALUSER = 54322;
     com.facebook.login.LoginManager fbLoginManager;
     CallbackManager callbackManager;
-
-    private SessionCallback callback;
+    private ISessionCallback mKakaoCallback;
+    private Session session;
+    private String TAG = "MainActivity";
+    private int session_openCount=0;
+    private String kakaouserid;
     ImageView iv_profile;
+    private MainActivity self;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -60,7 +71,11 @@ public class MainActivity extends AppCompatActivity {
         Button btn_kakaologin = (Button)findViewById(R.id.main_button_kakaotalklogin);
 
         iv_profile = (ImageView)findViewById(main_imageview_profile);
+
+
         checkPermission();
+
+
         AppEventsLogger.activateApp(this);
         btn_facebooklogin.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -77,6 +92,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
+
 
     private boolean checkPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -134,25 +150,14 @@ public class MainActivity extends AppCompatActivity {
                                 .diskCacheStrategy(DiskCacheStrategy.SOURCE)
                                 .into(iv_profile);
 
+                        request_Duplicate_Check_id(profile.getId(), LoggedInCase.FBLogin.getLogin_case());
+
                         GraphRequest request = GraphRequest.newMeRequest(
                                 loginResult.getAccessToken(),
                                 new GraphRequest.GraphJSONObjectCallback() {
                                     @Override
                                     public void onCompleted(JSONObject object, GraphResponse response) {
-                                        Log.v("LoginActivity", response.toString());
-
-
-
-                                        // Application code
-                                        // JSONObject data = response.getJSONObject();
-//                                        AccessToken accessToken = AccessToken.getCurrentAccessToken();
-//                                        String userID = accessToken.getUserId();
-//                                        String url = "https://graph.facebook.com/" + userID + "/picture?type=large";
-//                                        ImageView navProfile = (ImageView) findViewById(R.id.main_imageview_profile);
-//                                        Glide.with(getApplicationContext())
-//                                                .load(url)
-//                                                .diskCacheStrategy(DiskCacheStrategy.ALL)
-//                                                .into(navProfile);
+                                        Log.v(TAG, response.toString());
                                     }
                                 });
                         Bundle parameters = new Bundle();
@@ -205,15 +210,87 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void KKLogin() {
+        mKakaoCallback = new ISessionCallback() {
 
+
+            @Override
+            public void onSessionOpened() {
+                Log.e(TAG,"KAKAO Session Open");
+                Log.e("asdf","aaaaa");
+                if(session_openCount==0){
+                    session_openCount = 1;
+                    String kakaoAccessToken = session.getAccessToken();
+                    Log.e("asdf","bbbbb");
+                    kakaoRequestMe();
+                }
+
+            }
+
+            @Override
+            public void onSessionOpenFailed(KakaoException exception) {
+                Log.e(TAG,exception+"");
+                Log.e("asdf","ccccc");
+            }
+        };
+        session = getCurrentSession();
+        session.addCallback(mKakaoCallback);
+        session.checkAndImplicitOpen();
+        session.open(AuthType.KAKAO_TALK, this);
+    }
+
+    private void kakaoRequestMe() {
+        UserManagement.requestMe(new MeResponseCallback(){
+
+            @Override
+            public void onSuccess(UserProfile userProfile) {
+                Logger.d("UserProfile : " + userProfile);
+                Log.e(TAG,userProfile.toString());
+                String profilePictureUri = userProfile.getProfileImagePath();
+                Glide.with(getApplicationContext()).load(profilePictureUri)
+                        .diskCacheStrategy(DiskCacheStrategy.SOURCE)
+                        .into(iv_profile);
+
+                kakaouserid = String.valueOf(userProfile.getId());
+
+                request_Duplicate_Check_id(kakaouserid, LoggedInCase.KAKAOLogin.getLogin_case());
+
+                Log.e("asdf","asadada");
+
+            }
+
+            @Override
+            public void onSessionClosed(ErrorResult errorResult) {
+                Log.e(TAG,errorResult.getErrorMessage());
+            }
+
+            @Override
+            public void onNotSignedUp() {
+
+            }
+        });
+    }
+
+    private void request_Duplicate_Check_id(final String kakaouserid, final String login_case) {
     }
 
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-
-        callbackManager.onActivityResult(requestCode, resultCode, data);
+        session_openCount = 0;
+        if(resultCode == CANCLEJOINSOCIALUSER){
+            return;
+        }else if(resultCode == JOINSOCIALUSER){
+            Toast.makeText(self,"로그인 해주세요",Toast.LENGTH_LONG).show();
+        }
+        if(session!=null){
+            if (session.handleActivityResult(requestCode, resultCode, data)) {
+                return;
+            }
+        }
+        if(callbackManager!=null){
+            callbackManager.onActivityResult(requestCode,resultCode,data);
+        }
     }
 
 }
